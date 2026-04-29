@@ -1,10 +1,7 @@
 version: '3.8'
 
 services:
-  # ── All-in-One Agent Container ────────────────────────────────────────
-  # RUNNING:   Paperclip harness API + AIO Sandbox (via Docker socket)
-  # AVAILABLE: Hermes (openclaw), Cursor, Codex, Claude Code, Gemini CLI, OpenCode
-  agent:
+  paperclip-agent:
     build:
       context: .
       dockerfile: Dockerfile
@@ -12,47 +9,35 @@ services:
     container_name: paperclip-agent
     restart: unless-stopped
     ports:
-      - "3000:3000"   # Paperclip harness API
-      - "8080:8080"   # AIO Sandbox (VNC/browser)
-      - "5900:5900"   # AIO VNC
-      - "8888:8888"   # AIO Jupyter
-      - "8200:8200"   # AIO VSCode
-      - "9222:9222"   # AIO Chrome DevTools
-      - "18790:18790" # Hermes gateway (available, not started by default)
-      - "9000:9000"   # Cursor CLI (available)
-      - "9001:9001"   # Codex CLI (available)
-      - "9002:9002"   # Claude Code (available)
-      - "9003:9003"   # Gemini CLI (available)
-      - "9004:9004"   # OpenCode (available)
+      - "3100:3100"   # Paperclip API (official product)
+      - "18790:18790" # Hermes gateway (OpenClaw agent runtime)
+      # Additional CLI tools are pre-installed and available on $PATH
+      # docker exec paperclip-agent <tool-name> to invoke
     volumes:
+      - paperclip-data:/paperclip
       - agent-workspace:/workspace
-      # Mount Docker socket so AIO Sandbox can be spawned via "docker run"
-      - /var/run/docker.sock:/var/run/docker.sock
     environment:
-      # ── Paperclip / Harness ───────────────────────────────────────────
+      # ── Paperclip ───────────────────────────────────────────────────────
       - NODE_ENV=production
-      - PORT=3000
-      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:${POSTGRES_PASSWORD}@x0k4w8404wckwwcswg808gco:5432/projects}
-      - JWT_SECRET=${JWT_SECRET:-change-me-in-prod}
-      # ── Paperclip SaaS ────────────────────────────────────────────────
-      - PAPERCLIP_API_KEY=${PAPERCLIP_API_KEY}
-      - PAPERCLIP_API_URL=${PAPERCLIP_API_URL:-https://paperclip.rachkovan.com}
-      - PAPERCLIP_AGENT_ID=${PAPERCLIP_AGENT_ID}
-      - PAPERCLIP_COMPANY_ID=${PAPERCLIP_COMPANY_ID}
-      # ── Hermes / OpenClaw ────────────────────────────────────────────
+      - PORT=3100
+      - HOST=0.0.0.0
+      - PAPERCLIP_HOME=/paperclip
+      - PAPERCLIP_INSTANCE_ID=default
+      - PAPERCLIP_CONFIG=/paperclip/instances/default/config.json
+      - PAPERCLIP_DEPLOYMENT_MODE=authenticated
+      - PAPERCLIP_DEPLOYMENT_EXPOSURE=private
+      # ── Hermes / OpenClaw ──────────────────────────────────────────────
+      - HERMES_GATEWAY_PORT=18790
       - HERMES_MODEL=${HERMES_MODEL:-minimax/minimax-m2.7}
       - HERMES_INFERENCE_PROVIDER=${HERMES_INFERENCE_PROVIDER:-openrouter}
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN:-}
       - DISCORD_ALLOWED_USERS=588858125126336544
       - DISCORD_FREE_RESPONSE_CHANNELS=1484900474363842643,1489982401445888000,1489982424594251920
-      # ── Mem0 ─────────────────────────────────────────────────────────
+      # ── Mem0 ─────────────────────────────────────────────────────────────
       - MEM0_URL=${MEM0_URL:-http://mem0:5000}
       - MEM0_API_KEY=${MEM0_API_KEY:-mem0-self-hosted}
-      # ── Temporal ─────────────────────────────────────────────────────
-      - TEMPORAL_ADDRESS=${TEMPORAL_ADDRESS:-temporal:7233}
-      - TEMPORAL_NAMESPACE=${TEMPORAL_NAMESPACE:-default}
-      # ── DB ─────────────────────────────────────────────────────────────
+      # ── Database ────────────────────────────────────────────────────────
       - BOT_COORDINATION_DB_HOST=x0k4w8404wckwwcswg808gco
       - BOT_COORDINATION_DB_PORT=${BOT_COORDINATION_DB_PORT:-5432}
       - BOT_COORDINATION_DB_USER=${BOT_COORDINATION_DB_USER:-postgres}
@@ -60,16 +45,28 @@ services:
       - BOT_COORDINATION_DB_NAME=${BOT_COORDINATION_DB_NAME:-projects}
       - POSTGRES_MCP_DATABASE_URL=${POSTGRES_MCP_DATABASE_URL:-postgres://postgres:${POSTGRES_PASSWORD}@x0k4w8404wckwwcswg808gco:5432/postgres}
       - PROJECTS_MCP_DATABASE_URL=${PROJECTS_MCP_DATABASE_URL:-postgres://postgres:${POSTGRES_PASSWORD}@x0k4w8404wckwwcswg808gco:5432/projects}
-      # ── Sandbox env (passed to the AIO container spawned) ─────────────
-      - TZ=${TZ:-Asia/Singapore}
-      - WORKSPACE=/workspace
-    shm_size: 2gb
-    mem_limit: 8g
-    cpus: 4
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:${POSTGRES_PASSWORD}@x0k4w8404wckwwcswg808gco:5432/projects}
+      # ── Temporal ────────────────────────────────────────────────────────
+      - TEMPORAL_ADDRESS=${TEMPORAL_ADDRESS:-temporal:7233}
+      - TEMPORAL_NAMESPACE=${TEMPORAL_NAMESPACE:-default}
+      # ── AIO Sandbox ─────────────────────────────────────────────────────
+      - SANDBOX_URL=${SANDBOX_URL:-https://sandbox.agent-infra.com}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3100/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.paperclip.rule=Host(`paperclip.rachkovan.com`)"
+      - "traefik.http.services.paperclip.loadbalancer.server.port=3100"
+      - "traefik.http.routers.paperclip.tls=true"
+      - "traefik.http.routers.paperclip.tls.certresolver=letsencrypt"
     networks:
       - coolify
 
 volumes:
+  paperclip-data:
   agent-workspace:
 
 networks:

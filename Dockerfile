@@ -1,82 +1,103 @@
-# ── Paperclip-Deployment: All-in-One Agent Container ───────────────────────
-# ✓ RUNNING:   Paperclip harness API (port 3000) + AIO Sandbox (port 8080)
-# ✓ AVAILABLE: Hermes (openclaw), Cursor, Codex, Claude Code, Gemini CLI, OpenCode
-#   (pre-installed on $PATH, invoke on-demand via: docker exec paperclip-agent <tool>)
+# ── Paperclip-Deployment: Official Paperclip + All Agent Tools ───────────
+# Extends the official Paperclip product with additional CLI tools
+# Running:   Paperclip API (port 3100) + Hermes gateway (port 18790)
+# Available: Cursor, Codex, Claude Code, Gemini CLI, OpenCode (on $PATH)
 
-# ── Clone startup-factory source ──────────────────────────────────────────
-FROM node:22-bullseye AS builder
+# ── Build from official Paperclip multi-stage build ────────────────────────
+# syntax=docker/dockerfile:1.20
+FROM node:lts-trixie-slim AS base
+ARG USER_UID=1000
+ARG USER_GID=1000
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates gosu curl gh git wget ripgrep python3 \
+  && rm -rf /var/lib/apt/lists/* \
+  && corepack enable
 
+RUN usermod -u $USER_UID --non-unique node \
+  && groupmod -g $USER_GID --non-unique node \
+  && usermod -g $USER_GID -d /paperclip node
+
+FROM base AS deps
 WORKDIR /app
-RUN apt-get update && apt-get install -y openssl git curl && rm -rf /var/lib/apt/lists/*
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml .npmrc ./
+COPY cli/package.json cli/
+COPY server/package.json server/
+COPY ui/package.json ui/
+COPY packages/shared/package.json packages/shared/
+COPY packages/db/package.json packages/db/
+COPY packages/adapter-utils/package.json packages/adapter-utils/
+COPY packages/mcp-server/package.json packages/mcp-server/
+COPY packages/adapters/claude-local/package.json packages/adapters/claude-local/
+COPY packages/adapters/codex-local/package.json packages/adapters/codex-local/
+COPY packages/adapters/cursor-local/package.json packages/adapters/cursor-local/
+COPY packages/adapters/gemini-local/package.json packages/adapters/gemini-local/
+COPY packages/adapters/openclaw-gateway/package.json packages/adapters/openclaw-gateway/
+COPY packages/adapters/opencode-local/package.json packages/adapters/opencode-local/
+COPY packages/adapters/pi-local/package.json packages/adapters/pi-local/
+COPY packages/plugins/sdk/package.json packages/plugins/sdk/
+COPY --parents packages/plugins/sandbox-providers/./*/package.json packages/plugins/sandbox-providers/
+COPY packages/plugins/paperclip-plugin-fake-sandbox/package.json packages/plugins/paperclip-plugin-fake-sandbox/
+COPY patches/ patches/
+RUN pnpm install --frozen-lockfile
 
-# Clone the startup-factory harness source
-RUN git clone --depth=1 https://github.com/nanachichan3/startup-factory.git /app
-
+FROM base AS build
 WORKDIR /app
+COPY --from=deps /app /app
+COPY . .
+RUN pnpm --filter @paperclipai/ui build
+RUN pnpm --filter @paperclipai/plugin-sdk build
+RUN pnpm --filter @paperclipai/server build
+RUN test -f server/dist/index.js || (echo "ERROR: server build output missing" && exit 1)
 
-RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
-
-# Build TypeScript
-RUN npm install --legacy-peer-deps
-RUN npx tsc
-RUN npx prisma generate --schema=./packages/harness/prisma/schema.prisma
-
-# ── Production stage ──────────────────────────────────────────────────────
-FROM node:22-bullseye
-
+# ── Production stage — official Paperclip + extra tools ────────────────────
+FROM base AS production
+ARG USER_UID=1000
+ARG USER_GID=1000
 WORKDIR /app
+COPY --chown=node:node --from=build /app /app
 
-RUN apt-get update && apt-get install -y \
-    openssl curl wget git ca-certificates gnupg lsb-release \
-    python3 python3-pip python3-venv \
-    vim nano htop tree jq unzip \
-    supervisor \
-    && rm -rf /var/lib/apt/lists/*
+# Official Paperclip tools (already in official Dockerfile)
+RUN npm install --global --omit=dev @anthropic-ai/claude-code@latest @openai/codex@latest opencode-ai
 
-# Copy root package files
-COPY package.json package-lock.json ./
-
-# Install production deps
-RUN npm install --omit=dev --legacy-peer-deps
-
-# Copy built artifacts from builder
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
-COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/packages/harness/src ./src
-
-# ── Coding CLIs: pre-install but DO NOT start ──────────────────────────────
-# Hermes / OpenClaw
-RUN npm install -g openclaw@latest
-
-# Claude Code
-RUN npm install -g @anthropic-ai/claude-code@latest
-
+# ── Additional CLI tools ───────────────────────────────────────────────────
 # Cursor CLI
-RUN npm install -g @cursor.com/cli 2>/dev/null || \
-    npm install -g cursor-cli 2>/dev/null || true
+RUN npm install --global --omit=dev @cursor.com/cli 2>/dev/null || true
 
-# Codex CLI (via pip)
-RUN pip3 install --break-system-packages "openai>=1.0.0" "github-toolkit>=0.2.0" 2>/dev/null || true
-
-# Gemini CLI
+# Gemini CLI (Google AI)
 RUN pip3 install --break-system-packages google-generativeai 2>/dev/null || true
-RUN npm install -g @google/generative-ai-cli 2>/dev/null || true
 
-# OpenCode CLI
-RUN npm install -g opencode 2>/dev/null || true
+# Hermes / OpenClaw (agent runtime)
+RUN npm install --global --omit=dev openclaw@latest
 
-# ── Supervisor config ─────────────────────────────────────────────────────
+# Supervisor (manages Paperclip API + Hermes gateway)
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends openssh-client jq supervisor logrotate \
+  && rm -rf /var/lib/apt/lists/* \
+  && mkdir -p /paperclip \
+  && chown node:node /paperclip
+
+COPY scripts/docker-entrypoint.sh /usr/local/bin/
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
-RUN mkdir -p /var/log/supervisor /workspace
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh /etc/supervisor/conf.d/supervisord.conf
 
-# Non-root user
-RUN groupadd --gid 1001 appgroup && useradd --uid 1001 --gid appgroup appuser
-RUN chown -R appuser:appgroup /workspace /app
+# ── Environment ─────────────────────────────────────────────────────────────
+ENV NODE_ENV=production \
+  HOME=/paperclip \
+  HOST=0.0.0.0 \
+  PORT=3100 \
+  SERVE_UI=true \
+  PAPERCLIP_HOME=/paperclip \
+  PAPERCLIP_INSTANCE_ID=default \
+  USER_UID=${USER_UID} \
+  USER_GID=${USER_GID} \
+  PAPERCLIP_CONFIG=/paperclip/instances/default/config.json \
+  PAPERCLIP_DEPLOYMENT_MODE=authenticated \
+  PAPERCLIP_DEPLOYMENT_EXPOSURE=private \
+  OPENCODE_ALLOW_ALL_MODELS=true \
+  HERMES_GATEWAY_PORT=18790
 
-EXPOSE 3000 8080 18790 9000 9001 9002 9003 9004
+VOLUME ["/paperclip"]
 
-USER appuser
+EXPOSE 3100 18790
 
 ENTRYPOINT ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

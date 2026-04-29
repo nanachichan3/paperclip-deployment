@@ -1,47 +1,45 @@
 # Paperclip Deployment
 
-Single container with all agent tools — Paperclip harness, Hermes, AIO Sandbox, and every AI coding CLI pre-installed.
+Extended Paperclip product image with all AI coding tools pre-installed.
 
-## What's Running
+## What's Running (supervisor-managed)
 
 | Service | Port | Description |
 |---------|------|-------------|
-| **Paperclip API** | 3000 | Agent control-plane server |
-| **AIO Sandbox** | 8080 | Browser + terminal + file + MCP + Jupyter |
-| Hermes gateway | 18790 | Available (start on demand) |
+| **Paperclip API** | 3100 | Production Paperclip control-plane server |
+| **Hermes gateway** | 18790 | OpenClaw agent runtime (connected via `openclaw-gateway` adapter) |
 
-## What's Available (not running)
+## What's Available (pre-installed on `$PATH`, invoke on-demand)
 
-All pre-installed on `$PATH`. Invoke via `docker exec paperclip-agent <tool>`:
+| Tool | Invoke |
+|------|--------|
+| Claude Code | `docker exec paperclip-agent claude --help` |
+| Codex | `docker exec paperclip-agent codex --help` |
+| Cursor CLI | `docker exec paperclip-agent cursor --help` |
+| Gemini CLI | `docker exec paperclip-agent gemini --help` |
+| OpenCode | `docker exec paperclip-agent opencode --help` |
+| OpenClaw CLI | `docker exec paperclip-agent openclaw --help` |
 
-| Tool | Command |
-|------|---------|
-| OpenClaw / Hermes | `openclaw gateway start --port 18790` |
-| Claude Code | `claude --help` |
-| Codex | `codex --help` |
-| Cursor CLI | `cursor --help` |
-| Gemini CLI | `gemini --help` |
-| OpenCode | `opencode --help` |
+## Architecture
 
-## Deploy
+Built from `paperclipai/paperclip` (official product) + layered tooling:
+- Official Paperclip adapters already included: `cursor-local`, `gemini-local`, `openclaw-gateway`, `claude-local`, `codex-local`, `opencode-local`
+- Additional tools installed on top: Cursor CLI, Gemini CLI, OpenClaw/Hermes runtime
 
-### Coolify
-Point Coolify at this repo's `docker-compose.yaml`.
+## Build & Deploy
 
-### Local
 ```bash
+# Local
 docker compose build && docker compose up -d
+
+# Coolify — point at this repo's docker-compose.yaml
 ```
 
-### Docker Socket Required
-The compose mounts `/var/run/docker.sock` so the container can spawn the AIO Sandbox. Without it, only Paperclip runs.
+## Data Persistence
 
-## Build Image
-```bash
-docker build -t ghcr.io/nanachichan3/paperclip-deployment:latest .
-docker push ghcr.io/nanachichan3/paperclip-deployment:latest
-```
+All Paperclip data lives in `/paperclip` (backed by `paperclip-data` volume).
+**Data is safe** — the volume is preserved across rebuilds.
 
 ## Environment
 
-See `.env.example` — requires `PAPERCLIP_API_KEY`, `PAPERCLIP_COMPANY_ID`, `OPENROUTER_API_KEY`, `DISCORD_BOT_TOKEN`, and DB credentials.
+See `.env.example` — key vars: `OPENROUTER_API_KEY`, `DISCORD_BOT_TOKEN`, `DATABASE_URL`, `MEM0_URL`.
