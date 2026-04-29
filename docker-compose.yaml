@@ -1,203 +1,76 @@
 version: '3.8'
 
 services:
-  # ── Paperclip Control Plane ────────────────────────────────────────
-  paperclip:
+  # ── All-in-One Agent Container ────────────────────────────────────────
+  # RUNNING:   Paperclip harness API + AIO Sandbox (via Docker socket)
+  # AVAILABLE: Hermes (openclaw), Cursor, Codex, Claude Code, Gemini CLI, OpenCode
+  agent:
     build:
-      context: ./paperclip
+      context: .
       dockerfile: Dockerfile
     image: ghcr.io/nanachichan3/paperclip-deployment:latest
+    container_name: paperclip-agent
     restart: unless-stopped
     ports:
-      - "3000:3000"
-    environment:
-      - NODE_ENV=production
-      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:${POSTGRES_PASSWORD}@x0k4w8404wckwwcswg808gco:5432/paperclip}
-      - JWT_SECRET=${JWT_SECRET:-change-me-in-prod}
-    networks:
-      - coolify
-
-  # ── Hermes Agent ───────────────────────────────────────────────────
-  hermes:
-    build:
-      context: ./hermes
-      dockerfile: Dockerfile
-    image: ghcr.io/nanachichan3/hermes-agent:latest
-    restart: unless-stopped
-    ports:
-      - "18790:18790"
+      - "3000:3000"   # Paperclip harness API
+      - "8080:8080"   # AIO Sandbox (VNC/browser)
+      - "5900:5900"   # AIO VNC
+      - "8888:8888"   # AIO Jupyter
+      - "8200:8200"   # AIO VSCode
+      - "9222:9222"   # AIO Chrome DevTools
+      - "18790:18790" # Hermes gateway (available, not started by default)
+      - "9000:9000"   # Cursor CLI (available)
+      - "9001:9001"   # Codex CLI (available)
+      - "9002:9002"   # Claude Code (available)
+      - "9003:9003"   # Gemini CLI (available)
+      - "9004:9004"   # OpenCode (available)
     volumes:
-      - hermes-data:/data
+      - agent-workspace:/workspace
+      # Mount Docker socket so AIO Sandbox can be spawned via "docker run"
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
+      # ── Paperclip / Harness ───────────────────────────────────────────
+      - NODE_ENV=production
+      - PORT=3000
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:${POSTGRES_PASSWORD}@x0k4w8404wckwwcswg808gco:5432/projects}
+      - JWT_SECRET=${JWT_SECRET:-change-me-in-prod}
+      # ── Paperclip SaaS ────────────────────────────────────────────────
+      - PAPERCLIP_API_KEY=${PAPERCLIP_API_KEY}
+      - PAPERCLIP_API_URL=${PAPERCLIP_API_URL:-https://paperclip.rachkovan.com}
+      - PAPERCLIP_AGENT_ID=${PAPERCLIP_AGENT_ID}
+      - PAPERCLIP_COMPANY_ID=${PAPERCLIP_COMPANY_ID}
+      # ── Hermes / OpenClaw ────────────────────────────────────────────
       - HERMES_MODEL=${HERMES_MODEL:-minimax/minimax-m2.7}
       - HERMES_INFERENCE_PROVIDER=${HERMES_INFERENCE_PROVIDER:-openrouter}
-      - HERMES_GATEWAY_PORT=18790
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
       - DISCORD_ALLOWED_USERS=588858125126336544
-      - DISCORD_REQUIRE_MENTION=false
       - DISCORD_FREE_RESPONSE_CHANNELS=1484900474363842643,1489982401445888000,1489982424594251920
+      # ── Mem0 ─────────────────────────────────────────────────────────
       - MEM0_URL=${MEM0_URL:-http://mem0:5000}
       - MEM0_API_KEY=${MEM0_API_KEY:-mem0-self-hosted}
+      # ── Temporal ─────────────────────────────────────────────────────
       - TEMPORAL_ADDRESS=${TEMPORAL_ADDRESS:-temporal:7233}
       - TEMPORAL_NAMESPACE=${TEMPORAL_NAMESPACE:-default}
+      # ── DB ─────────────────────────────────────────────────────────────
+      - BOT_COORDINATION_DB_HOST=x0k4w8404wckwwcswg808gco
+      - BOT_COORDINATION_DB_PORT=${BOT_COORDINATION_DB_PORT:-5432}
+      - BOT_COORDINATION_DB_USER=${BOT_COORDINATION_DB_USER:-postgres}
+      - BOT_COORDINATION_DB_PASS=${BOT_COORDINATION_DB_PASS}
+      - BOT_COORDINATION_DB_NAME=${BOT_COORDINATION_DB_NAME:-projects}
       - POSTGRES_MCP_DATABASE_URL=${POSTGRES_MCP_DATABASE_URL:-postgres://postgres:${POSTGRES_PASSWORD}@x0k4w8404wckwwcswg808gco:5432/postgres}
       - PROJECTS_MCP_DATABASE_URL=${PROJECTS_MCP_DATABASE_URL:-postgres://postgres:${POSTGRES_PASSWORD}@x0k4w8404wckwwcswg808gco:5432/projects}
-    networks:
-      - coolify
-
-  # ── AIO Sandbox ────────────────────────────────────────────────────
-  sandbox:
-    image: ghcr.io/agent-infra/sandbox:latest
-    container_name: aio-sandbox
-    security_opt:
-      - seccomp:unconfined
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    restart: unless-stopped
+      # ── Sandbox env (passed to the AIO container spawned) ─────────────
+      - TZ=${TZ:-Asia/Singapore}
+      - WORKSPACE=/workspace
     shm_size: 2gb
     mem_limit: 8g
     cpus: 4
-    ports:
-      - "8080:8080"
-    environment:
-      - PROXY_SERVER=${PROXY_SERVER:-}
-      - JWT_PUBLIC_KEY=${JWT_PUBLIC_KEY:-}
-      - WORKSPACE=${WORKSPACE:-/home/gem/workspace}
-      - HOMEPAGE=${HOMEPAGE:-}
-      - TZ=${TZ:-Asia/Singapore}
-      - DISPLAY_WIDTH=1280
-      - DISPLAY_HEIGHT=1024
-      - WAIT_PORTS=8079,8091
-      - VNC_SERVER_PORT=5900
-      - PUBLIC_PORT=8080
-      - AUTH_BACKEND_PORT=8081
-      - WEBSOCKET_PROXY_PORT=6080
-      - GEM_SERVER_PORT=8088
-      - MCP_HUB_PORT=8079
-      - SANDBOX_SRV_PORT=8091
-      - JUPYTER_LAB_PORT=8888
-      - CODE_SERVER_PORT=8200
-      - MCP_SERVER_BROWSER_PORT=8100
-      - TINYPROXY_PORT=8118
-      - MCP_SERVER_MARKITDOWN_PORT=8101
-      - MCP_SERVER_CHROME_DEVTOOLS_PORT=8102
-      - BROWSER_REMOTE_DEBUGGING_PORT=9222
-      - PIP_INDEX_URL=${PIP_INDEX_URL:-https://pypi.org/simple}
-      - UV_DEFAULT_INDEX=${UV_DEFAULT_INDEX:-https://pypi.org/simple}
-      - NPM_CONFIG_REGISTRY=${NPM_CONFIG_REGISTRY:-https://registry.npmjs.org}
-      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
-      - AIO_SKILLS_PATH=${AIO_SKILLS_PATH:-}
-      - DISABLE_JUPYTER=${DISABLE_JUPYTER:-false}
-      - DISABLE_CODE_SERVER=${DISABLE_CODE_SERVER:-false}
-      - ALLOW_CURSOR=${ALLOW_CURSOR:-true}
-      - ALLOW_CODEX=${ALLOW_CODEX:-true}
-      - ALLOW_CLAUDE_CODE=${ALLOW_CLAUDE_CODE:-true}
-      - ALLOW_GEMINI_CLI=${ALLOW_GEMINI_CLI:-true}
-      - ALLOW_OPENCODE=${ALLOW_OPENCODE:-true}
-    volumes:
-      - sandbox-workspace:/home/gem/workspace
-    networks:
-      - coolify
-
-  # ── Coding CLI Wrappers ────────────────────────────────────────────
-  cursor:
-    image: cursor/cli:latest
-    container_name: cursor-cli
-    restart: unless-stopped
-    ports:
-      - "9000:9000"
-    volumes:
-      - cursor-data:/root/.cursor
-      - cursor-workspace:/workspace
-    environment:
-      - CURSOR_API_KEY=${CURSOR_API_KEY:-}
-    networks:
-      - coolify
-
-  codex:
-    build:
-      context: ./codex
-      dockerfile: Dockerfile
-    image: ghcr.io/nanachichan3/codex-cli:latest
-    container_name: codex-cli
-    restart: unless-stopped
-    ports:
-      - "9001:9001"
-    volumes:
-      - codex-data:/root/.codex
-      - codex-workspace:/workspace
-    environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
-    networks:
-      - coolify
-
-  claude-code:
-    build:
-      context: ./claude-code
-      dockerfile: Dockerfile
-    image: ghcr.io/nanachichan3/claude-code:latest
-    container_name: claude-code
-    restart: unless-stopped
-    ports:
-      - "9002:9002"
-    volumes:
-      - claude-data:/root/.claude
-      - claude-workspace:/workspace
-    environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - CLAUDE_LICENSE_KEY=${CLAUDE_LICENSE_KEY:-}
-    networks:
-      - coolify
-
-  gemini-cli:
-    build:
-      context: ./gemini-cli
-      dockerfile: Dockerfile
-    image: ghcr.io/nanachichan3/gemini-cli:latest
-    container_name: gemini-cli
-    restart: unless-stopped
-    ports:
-      - "9003:9003"
-    volumes:
-      - gemini-data:/root/.gemini
-      - gemini-workspace:/workspace
-    environment:
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
-    networks:
-      - coolify
-
-  opencode:
-    build:
-      context: ./opencode
-      dockerfile: Dockerfile
-    image: ghcr.io/nanachichan3/opencode:latest
-    container_name: opencode
-    restart: unless-stopped
-    ports:
-      - "9004:9004"
-    volumes:
-      - opencode-data:/root/.opencode
-      - opencode-workspace:/workspace
-    environment:
-      - OPENCODE_API_KEY=${OPENCODE_API_KEY:-}
     networks:
       - coolify
 
 volumes:
-  hermes-data:
-  sandbox-workspace:
-  cursor-data:
-  cursor-workspace:
-  codex-data:
-  codex-workspace:
-  claude-data:
-  claude-workspace:
-  gemini-data:
-  gemini-workspace:
-  opencode-data:
-  opencode-workspace:
+  agent-workspace:
 
 networks:
   coolify:
