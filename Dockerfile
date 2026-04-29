@@ -3,22 +3,23 @@
 # ✓ AVAILABLE: Hermes (openclaw), Cursor, Codex, Claude Code, Gemini CLI, OpenCode
 #   (pre-installed on $PATH, invoke on-demand via: docker exec paperclip-agent <tool>)
 
-# ── Build stage: compile TypeScript ──────────────────────────────────────
+# ── Clone startup-factory source ──────────────────────────────────────────
 FROM node:22-bullseye AS builder
+
+WORKDIR /app
+RUN apt-get update && apt-get install -y openssl git curl && rm -rf /var/lib/apt/lists/*
+
+# Clone the startup-factory harness source
+RUN git clone --depth=1 https://github.com/nanachichan3/startup-factory.git /app
 
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 
-COPY package.json package-lock.json ./
-COPY packages/harness/package.json ./
-COPY packages/harness/prisma ./prisma
-COPY packages/harness/tsconfig.json ./
-COPY packages/harness/src ./src
-
+# Build TypeScript
 RUN npm install --legacy-peer-deps
 RUN npx tsc
-RUN npx prisma generate --schema=./prisma/schema.prisma
+RUN npx prisma generate --schema=./packages/harness/prisma/schema.prisma
 
 # ── Production stage ──────────────────────────────────────────────────────
 FROM node:22-bullseye
@@ -29,7 +30,7 @@ RUN apt-get update && apt-get install -y \
     openssl curl wget git ca-certificates gnupg lsb-release \
     python3 python3-pip python3-venv \
     vim nano htop tree jq unzip \
-    supervisor logrotate \
+    supervisor \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy root package files
@@ -43,8 +44,6 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/node_modules ./node_modules
-
-# Copy startup-factory source (for runtime reference)
 COPY --from=builder /app/packages/harness/src ./src
 
 # ── Coding CLIs: pre-install but DO NOT start ──────────────────────────────
@@ -68,7 +67,7 @@ RUN npm install -g @google/generative-ai-cli 2>/dev/null || true
 # OpenCode CLI
 RUN npm install -g opencode 2>/dev/null || true
 
-# ── Supervisor config ──────────────────────────────────────────────────────
+# ── Supervisor config ─────────────────────────────────────────────────────
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 RUN mkdir -p /var/log/supervisor /workspace
 
