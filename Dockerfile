@@ -37,8 +37,8 @@ COPY --chown=node:node --from=build /build/ui /app/ui
 COPY --chown=node:node --from=build /build/packages /app/packages
 COPY --chown=node:node --from=build /build/patches /app/patches
 
-# Install Hermes Agent (NousResearch) — provides the `hermes` CLI
-RUN curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
+# Install OpenClaw gateway (required for Paperclip's hermes_local adapter)
+RUN npm install -g openclaw
 
 # Cursor CLI
 RUN npm install --global --omit=dev cursor-ai 2>/dev/null || \
@@ -53,7 +53,8 @@ RUN apt-get update \
 
 RUN echo '[supervisord]\nnodaemon=true\nlogfile=/var/log/supervisor/supervisord.log\npidfile=/var/run/supervisord.pid\nloglevel=info\n\n[program:paperclip]\ncommand=gosu node node --import /app/server/node_modules/tsx/dist/loader.mjs /app/server/dist/index.js\ndirectory=/app\nenvironment=NODE_ENV="production",HOME="/paperclip",HOST="0.0.0.0",PORT="3100"\nstdout_logfile=/var/log/supervisor/paperclip.log\nstderr_logfile=/var/log/supervisor/paperclip.err\nautostart=true\nautorestart=true\npriority=100\n\n[program:hermes]\ncommand=gosu node openclaw gateway start --port 18790\nenvironment=NODE_ENV="production",HOME="/paperclip"\nstdout_logfile=/var/log/supervisor/hermes.log\nstderr_logfile=/var/log/supervisor/hermes.err\nautostart=true\nautorestart=true\npriority=200' > /etc/supervisor/conf.d/supervisord.conf
 
-ENV NODE_ENV=production \
+ENV PATH="/app/node_modules/.bin:$PATH" \
+  NODE_ENV=production \
   HOME=/paperclip \
   HOST=0.0.0.0 \
   PORT=3100 \
