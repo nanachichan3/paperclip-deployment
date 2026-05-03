@@ -4,7 +4,7 @@
 # Push:   docker push ghcr.io/nanachichan3/paperclip-deployment:latest
 
 # syntax=docker/dockerfile:1.20
-FROM paperclipai/paperclip:latest AS production
+FROM ghcr.io/paperclipai/paperclip:latest AS production
 
 USER root
 
