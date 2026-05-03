@@ -1,30 +1,27 @@
-# ── Paperclip Deployment: Official Image + Hermes + Cursor ──────────────────
-# Start from the official Paperclip image, add missing tools on top
-# Running: Paperclip API (port 3100) + Hermes gateway (port 18790)
+# ── Paperclip Deployment: Official Paperclip + Hermes Agent + Cursor ──────────
+# Start from official Paperclip image, layer Hermes Agent and Cursor on top
 # Build:  docker build -t ghcr.io/nanachichan3/paperclip-deployment:latest .
 # Push:   docker push ghcr.io/nanachichan3/paperclip-deployment:latest
 
-FROM paperclipai/paperclip:latest
+# syntax=docker/dockerfile:1.20
+FROM paperclipai/paperclip:latest AS production
 
 USER root
 
-# ── Extra tools ───────────────────────────────────────────────────────────
-# Hermes Agent (Python CLI required by Paperclip's hermes adapter)
-RUN pip3 install --break-system-packages hermes-agent || \
-    python3 -m pip install --break-system-packages hermes-agent || true
+# ── Hermes Agent ( NousResearch — the CLI Paperclip's adapter expects) ───────
+# Installs hermes CLI via the official curl | bash installer
+RUN curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
 
-# Cursor CLI (known package names)
+# ── Additional tools ──────────────────────────────────────────────────────
+# Cursor CLI
 RUN npm install --global --omit=dev cursor-ai 2>/dev/null || \
     npm install --global --omit=dev @cursor.com/cli 2>/dev/null || true
 
-# Gemini CLI
-RUN pip3 install --break-system-packages google-generativeai 2>/dev/null || true
-
-# OpenClaw / Hermes gateway
-RUN npm install --global --omit=dev openclaw@latest || true
+# OpenClaw / Hermes gateway (Python tools)
+RUN pip3 install --break-system-packages openclaw 2>/dev/null || true
 
 USER paperclip
 
-# ── Start Paperclip API ────────────────────────────────────────────────────
 EXPOSE 3100 18790
+
 CMD ["paperclip"]
