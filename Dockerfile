@@ -9,7 +9,7 @@ FROM node:lts-trixie-slim AS base
 ARG USER_UID=1000
 ARG USER_GID=1000
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates gosu curl gh git wget ripgrep python3 \
+  && apt-get install -y --no-install-recommends ca-certificates gosu curl gh git wget ripgrep python3 python3-pip \
   && rm -rf /var/lib/apt/lists/* \
   && corepack enable
 
@@ -60,13 +60,19 @@ COPY --chown=node:node --from=build /app /app
 RUN npm install --global --omit=dev @anthropic-ai/claude-code@latest @openai/codex@latest opencode-ai
 
 # ── Additional CLI tools ───────────────────────────────────────────────────
-# Cursor CLI
-RUN npm install --global --omit=dev @cursor.com/cli 2>/dev/null || true
+# Hermes Agent (Python CLI that Paperclip's hermes adapter invokes)
+RUN pip3 install --break-system-packages hermes-agent 2>/dev/null || \
+    python3 -m pip install --break-system-packages hermes-agent 2>/dev/null || true
+
+# Cursor CLI (try multiple known package names)
+RUN npm install --global --omit=dev @cursoruse/cli 2>/dev/null || \
+    npm install --global --omit=dev cursor-ai 2>/dev/null || \
+    npm install --global --omit=dev @cursor.com/cli 2>/dev/null || true
 
 # Gemini CLI (Google AI)
 RUN pip3 install --break-system-packages google-generativeai 2>/dev/null || true
 
-# Hermes / OpenClaw (agent runtime)
+# OpenClaw CLI / Hermes gateway
 RUN npm install --global --omit=dev openclaw@latest
 
 # Supervisor (manages Paperclip API + Hermes gateway)
@@ -76,9 +82,7 @@ RUN apt-get update \
   && mkdir -p /paperclip \
   && chown node:node /paperclip
 
-COPY scripts/docker-entrypoint.sh /usr/local/bin/
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh /etc/supervisor/conf.d/supervisord.conf
 
 # ── Environment ─────────────────────────────────────────────────────────────
 ENV NODE_ENV=production \
